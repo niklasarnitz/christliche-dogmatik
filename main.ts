@@ -6,9 +6,31 @@ import {
 } from "@google/genai";
 import { PDFDocument } from "pdf-lib";
 import * as fs from "fs/promises";
-import * as fsExtra from "fs";
 import * as path from "path";
 import { fromPath } from "pdf2pic";
+import axios from "axios";
+/**
+ * Send a notification via Pushover API
+ * @param message The message to send
+ */
+async function sendPushoverNotification(message: string) {
+  const pushoverUserKey = process.env.PUSHOVER_USER_KEY;
+  const pushoverApiToken = process.env.PUSHOVER_API_TOKEN;
+  if (!pushoverUserKey || !pushoverApiToken) {
+    console.warn("Pushover credentials not set in environment variables.");
+    return;
+  }
+  try {
+    await axios.post("https://api.pushover.net/1/messages.json", {
+      token: pushoverApiToken,
+      user: pushoverUserKey,
+      message,
+    });
+    console.log("Pushover notification sent.");
+  } catch (err) {
+    console.error("Failed to send Pushover notification:", err);
+  }
+}
 
 // --- Konfiguration ---
 const PDF_PATH = "./Pieper-Dogmatik1.pdf"; // Ersetzen Sie dies durch den Pfad zu Ihrer PDF-Datei
@@ -63,30 +85,6 @@ async function setupWorkspace() {
 % Die einzelnen Seiten werden hier inkludiert
 `;
     await fs.writeFile(MAIN_TEX_PATH, initialContent);
-  }
-}
-
-/**
- * Liest die main.tex-Datei, um die letzte erfolgreich verarbeitete Seite zu ermitteln.
- * @returns Die Seitenzahl der letzten verarbeiteten Seite.
- */
-async function getLastProcessedPage(): Promise<number> {
-  try {
-    const mainTexContent = await fs.readFile(MAIN_TEX_PATH, "utf-8");
-    const includeStatements =
-      mainTexContent.match(/\\include{page(\d+)}/g) || [];
-    if (includeStatements.length === 0) {
-      return 0;
-    }
-    const lastInclude = includeStatements[includeStatements.length - 1];
-    if (!lastInclude) return 0;
-    const lastPageMatch = lastInclude.match(/(\d+)/);
-    return lastPageMatch && lastPageMatch[1]
-      ? parseInt(lastPageMatch[1], 10)
-      : 0;
-  } catch (error) {
-    // Wenn die Datei nicht existiert, fangen wir bei 0 an.
-    return 0;
   }
 }
 
@@ -178,6 +176,11 @@ Deine Aufgabe:
     const responseText = result.text as string;
 
     try {
+      if (typeof responseText !== "string") {
+        console.info(result.data);
+        throw new Error("Antwort war kein String.");
+      }
+
       const parsedJson = result
         ? (JSON.parse(responseText) as OcrResponse)
         : null;
@@ -218,70 +221,89 @@ async function processPdfDocument() {
     width: 2480, // A4 @ 300dpi
     height: 3508,
   });
+
+  const MAX_RETRIES = 3;
+
   for (let i = lastProcessedPage; i < totalPages; i++) {
     const pageNum = i + 1;
     console.log(`Beginne Verarbeitung von Seite ${pageNum}/${totalPages}...`);
 
-    try {
-      // Kontext: vorherige, aktuelle, nächste Seite als Bild extrahieren
-      const getImageBuffer = async (
-        pageIdx: number
-      ): Promise<Buffer | null> => {
-        if (pageIdx < 1 || pageIdx > totalPages) return null;
-        const result = await converter(pageIdx);
-        const outputImagePath = result.path;
-        if (outputImagePath) {
-          const buf = await fs.readFile(outputImagePath);
-          // PNG nach Verarbeitung löschen
-          try {
-            await fsExtra.unlinkSync(outputImagePath);
-          } catch {}
-          return buf.length > 0 ? buf : null;
+    let success = false;
+    let lastError: any = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Kontext: vorherige, aktuelle, nächste Seite als Bild extrahieren
+        const getImageBuffer = async (
+          pageIdx: number
+        ): Promise<Buffer | null> => {
+          if (pageIdx < 1 || pageIdx > totalPages) return null;
+          const result = await converter(pageIdx);
+          const outputImagePath = result.path;
+          if (outputImagePath) {
+            const buf = await fs.readFile(outputImagePath);
+            // PNG wird nicht mehr gelöscht
+            return buf.length > 0 ? buf : null;
+          }
+          return null;
+        };
+
+        const prevBuffer = await getImageBuffer(pageNum - 1);
+        const currBuffer = await getImageBuffer(pageNum);
+        const nextBuffer = await getImageBuffer(pageNum + 1);
+        if (!currBuffer) {
+          console.warn(
+            `WARNUNG: Seite ${pageNum} konnte nicht als Bild extrahiert werden.`
+          );
+          throw new Error("Seitenbild konnte nicht extrahiert werden.");
         }
-        return null;
-      };
 
-      const prevBuffer = await getImageBuffer(pageNum - 1);
-      const currBuffer = await getImageBuffer(pageNum);
-      const nextBuffer = await getImageBuffer(pageNum + 1);
-      if (!currBuffer) {
-        console.warn(
-          `WARNUNG: Seite ${pageNum} konnte nicht als Bild extrahiert werden.`
+        const ocrContent = await processPageWithGemini([
+          prevBuffer,
+          currBuffer,
+          nextBuffer,
+        ]);
+
+        const pageTexPath = path.join(OUTPUT_DIR, `page${pageNum}.tex`);
+        await fs.writeFile(pageTexPath, ocrContent);
+
+        // Füge \include{page...} immer direkt vor \end{document} ein
+        let mainTexContent = await fs.readFile(MAIN_TEX_PATH, "utf-8");
+        const includeLine = `\n\\include{page${pageNum}}`;
+        if (mainTexContent.includes("\\end{document}")) {
+          const idx = mainTexContent.lastIndexOf("\\end{document}");
+          mainTexContent =
+            mainTexContent.slice(0, idx) +
+            includeLine +
+            "\n" +
+            mainTexContent.slice(idx);
+          await fs.writeFile(MAIN_TEX_PATH, mainTexContent);
+        } else {
+          await fs.appendFile(MAIN_TEX_PATH, includeLine);
+        }
+
+        console.log(
+          `Seite ${pageNum} erfolgreich verarbeitet und in main.tex inkludiert.`
         );
-        continue;
+        success = true;
+        break;
+      } catch (error) {
+        lastError = error;
+        console.error(
+          `Fehler bei der Verarbeitung von Seite ${pageNum}, Versuch ${attempt} von ${MAX_RETRIES}.`,
+          error
+        );
+        if (attempt < MAX_RETRIES) {
+          console.log("Erneuter Versuch...");
+        }
       }
-
-      const ocrContent = await processPageWithGemini([
-        prevBuffer,
-        currBuffer,
-        nextBuffer,
-      ]);
-
-      const pageTexPath = path.join(OUTPUT_DIR, `page${pageNum}.tex`);
-      await fs.writeFile(pageTexPath, ocrContent);
-
-      // Füge \include{page...} immer direkt vor \end{document} ein
-      let mainTexContent = await fs.readFile(MAIN_TEX_PATH, "utf-8");
-      const includeLine = `\n\\include{page${pageNum}}`;
-      if (mainTexContent.includes("\\end{document}")) {
-        const idx = mainTexContent.lastIndexOf("\\end{document}");
-        mainTexContent =
-          mainTexContent.slice(0, idx) +
-          includeLine +
-          "\n" +
-          mainTexContent.slice(idx);
-        await fs.writeFile(MAIN_TEX_PATH, mainTexContent);
-      } else {
-        await fs.appendFile(MAIN_TEX_PATH, includeLine);
-      }
-
-      console.log(
-        `Seite ${pageNum} erfolgreich verarbeitet und in main.tex inkludiert.`
+    }
+    if (!success) {
+      await sendPushoverNotification(
+        `Seite ${pageNum} konnte nach ${MAX_RETRIES} Versuchen nicht verarbeitet werden.`
       );
-    } catch (error) {
       console.error(
-        `Fehler bei der Verarbeitung von Seite ${pageNum}. Das Skript wird angehalten.`,
-        error
+        `Seite ${pageNum} konnte nach ${MAX_RETRIES} Versuchen nicht verarbeitet werden. Das Skript wird angehalten.`,
+        lastError
       );
       break;
     }
