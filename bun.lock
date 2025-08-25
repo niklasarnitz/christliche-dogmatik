@@ -7,7 +7,6 @@
         "@google/genai": "^1.15.0",
         "axios": "^1.11.0",
         "pdf-lib": "^1.17.1",
-        "pdf-poppler": "^0.2.1",
         "pdf2pic": "^3.2.0",
       },
       "devDependencies": {
@@ -132,8 +131,6 @@
     "path-key": ["path-key@3.1.1", "", {}, "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q=="],
 
     "pdf-lib": ["pdf-lib@1.17.1", "", { "dependencies": { "@pdf-lib/standard-fonts": "^1.0.0", "@pdf-lib/upng": "^1.0.1", "pako": "^1.0.11", "tslib": "^1.11.1" } }, "sha512-V/mpyJAoTsN4cnP31vc0wfNA1+p20evqqnap0KLoRUN0Yk/p3wN52DOEsL4oBFcLdb76hlpKPtzJIgo67j/XLw=="],
-
-    "pdf-poppler": ["pdf-poppler@0.2.1", "", {}, "sha512-ilrm02mfsha1pR1wmiVKNRIkjvSo70gorg3DIPOzCl6pFU5S39z+gTHLiwIKn808H4YVYVnm6JstUhGNfiGKXg=="],
 
     "pdf2pic": ["pdf2pic@3.2.0", "", { "dependencies": { "gm": "^1.25.1" } }, "sha512-p0bp+Mp4iJy2hqSCLvJ521rDaZkzBvDFT9O9Y0BUID3I04/eDaebAFM5t8hoWeo2BCf42cDijLCGJWTOtkJVpA=="],
 
