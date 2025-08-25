@@ -257,11 +257,33 @@ async function processPdfDocument() {
           throw new Error("Seitenbild konnte nicht extrahiert werden.");
         }
 
-        const ocrContent = await processPageWithGemini([
-          prevBuffer,
-          currBuffer,
-          nextBuffer,
-        ]);
+        let ocrContent: string;
+        try {
+          ocrContent = await processPageWithGemini([
+            prevBuffer,
+            currBuffer,
+            nextBuffer,
+          ]);
+        } catch (error: any) {
+          // Handle Gemini API quota error (429)
+          const errStr = error?.toString?.() || "";
+          if (
+            errStr.includes("ApiError") &&
+            errStr.includes("RESOURCE_EXHAUSTED") &&
+            errStr.includes("retryDelay")
+          ) {
+            // Try to extract retryDelay from error string
+            const match = errStr.match(/"retryDelay":"(\d+)s"/);
+            const seconds = match ? parseInt(match[1], 10) : 20;
+            console.warn(
+              `Gemini API quota exceeded. Warte ${seconds} Sekunden vor erneutem Versuch...`
+            );
+            await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+            throw error; // Let the outer catch retry
+          } else {
+            throw error;
+          }
+        }
 
         const pageTexPath = path.join(OUTPUT_DIR, `page${pageNum}.tex`);
         await fs.writeFile(pageTexPath, ocrContent);
@@ -288,12 +310,23 @@ async function processPdfDocument() {
         break;
       } catch (error) {
         lastError = error;
-        console.error(
-          `Fehler bei der Verarbeitung von Seite ${pageNum}, Versuch ${attempt} von ${MAX_RETRIES}.`,
-          error
-        );
-        if (attempt < MAX_RETRIES) {
-          console.log("Erneuter Versuch...");
+        // If quota error, don't count as a failed attempt, just retry after delay
+        const errStr = error?.toString?.() || "";
+        if (
+          errStr.includes("ApiError") &&
+          errStr.includes("RESOURCE_EXHAUSTED") &&
+          errStr.includes("retryDelay")
+        ) {
+          // Already handled above, so don't increment attempt
+          attempt--;
+        } else {
+          console.error(
+            `Fehler bei der Verarbeitung von Seite ${pageNum}, Versuch ${attempt} von ${MAX_RETRIES}.`,
+            error
+          );
+          if (attempt < MAX_RETRIES) {
+            console.log("Erneuter Versuch...");
+          }
         }
       }
     }
