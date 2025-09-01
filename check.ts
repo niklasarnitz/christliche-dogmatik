@@ -14,7 +14,7 @@ import { createGoogleAI, STANDARD_SAFETY_SETTINGS, validateGoogleAIKey } from ".
 const OUTPUT_DIR = "./output";
 const DIFF_DIR = "./output-diff";
 const PDF_PATH = "./Pieper-Dogmatik1.pdf";
-const MODEL_NAME = "gemini-2.5";
+const MODEL_NAME = "gemini-2.5-pro";
 
 /**
  * Setup the diff output directory
