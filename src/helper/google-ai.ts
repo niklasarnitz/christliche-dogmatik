@@ -40,9 +40,9 @@ export const STANDARD_SAFETY_SETTINGS = [
  * @throws Error if API key is not set
  */
 export function validateGoogleAIKey(): string {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("GOOGLE_AI_API_KEY environment variable is required.");
+    throw new Error("GEMINI_API_KEY environment variable is required.");
   }
   return apiKey;
 }
