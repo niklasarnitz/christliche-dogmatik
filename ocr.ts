@@ -15,7 +15,7 @@ import { createGoogleAI, STANDARD_SAFETY_SETTINGS, validateGoogleAIKey } from ".
 const PDF_PATH = "./Pieper-Dogmatik1.pdf";
 const OUTPUT_DIR = "./output";
 const MAIN_TEX_PATH = path.join(OUTPUT_DIR, "main.tex");
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-2.5";
 
 // --- Typdefinition für die erwartete strukturierte Antwort ---
 interface OcrResponse {
